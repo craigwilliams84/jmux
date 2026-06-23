@@ -10,11 +10,10 @@ import {
   type JmuxConfig,
 } from "../config";
 import { INTERNAL_SESSION_FILTER } from "../glass/internal-sessions";
-import { LinearAdapter } from "../adapters/linear";
-import { buildLinearPrompt } from "../adapters/linear-prompt";
+import { createAdapters } from "../adapters/registry";
 import { buildClaudeLaunchCommand } from "./run-claude";
 import { US } from "./agent";
-import type { Issue } from "../adapters/types";
+import type { Issue, IssueTrackerAdapter } from "../adapters/types";
 import type { ParsedCtlArgs } from "../cli";
 
 // --- Tmux-option-backed issue↔session links ----------------------------------
@@ -172,13 +171,26 @@ export async function handleIssue(
   }
 }
 
+/**
+ * Build the configured issue-tracker adapter from ~/.config/jmux/config.json and
+ * authenticate it. Returns null when no issue tracker is configured at all.
+ */
+async function getIssueTracker(): Promise<IssueTrackerAdapter | null> {
+  const { issueTracker } = createAdapters(loadUserConfig().adapters);
+  if (!issueTracker) return null;
+  await issueTracker.authenticate();
+  return issueTracker;
+}
+
 async function fetchIssue(issueId: string): Promise<Issue | null> {
-  const adapter = new LinearAdapter({});
-  await adapter.authenticate();
-  if (adapter.authState !== "ok") {
+  const adapter = await getIssueTracker();
+  if (!adapter) {
     throw new CliError(
-      "Linear is not configured: set LINEAR_API_KEY or LINEAR_TOKEN",
+      "no issue tracker configured: set adapters.issueTracker in ~/.config/jmux/config.json",
     );
+  }
+  if (adapter.authState !== "ok") {
+    throw new CliError(`${adapter.type} is not configured: set ${adapter.authHint}`);
   }
   // getIssueByBranch extracts the identifier from the string and resolves it.
   return await adapter.getIssueByBranch(issueId);
@@ -322,13 +334,12 @@ async function issueStart(
 
   const config = loadUserConfig();
 
-  // Fetch issue when Linear is configured — needed for the team→repo mapping,
+  // Fetch issue when a tracker is configured — needed for the team→repo mapping,
   // the branch name, and the launch prompt. Tolerate an unconfigured tracker as
   // long as --repo is supplied.
   let issue: Issue | null = null;
-  const adapter = new LinearAdapter({});
-  await adapter.authenticate();
-  if (adapter.authState === "ok") {
+  const adapter = await getIssueTracker();
+  if (adapter && adapter.authState === "ok") {
     issue = await adapter.getIssueByBranch(issueId);
     // Tracker is configured but the id resolves to nothing — almost certainly a
     // typo. Refuse rather than silently create a worktree + launch Claude with
@@ -337,7 +348,7 @@ async function issueStart(
     // an explicit --repo.
     if (!issue) {
       throw new CliError(
-        `issue "${issueId}" not found in Linear — refusing to start work for an unknown issue`,
+        `issue "${issueId}" not found in ${adapter.type} — refusing to start work for an unknown issue`,
       );
     }
   }
@@ -369,8 +380,8 @@ async function issueStart(
     const claudeCmd = config.claudeCommand ?? "claude";
     const shell = process.env.SHELL ?? "/bin/sh";
     let promptFile: string | null = null;
-    if (issue) {
-      const prompt = buildLinearPrompt(issue);
+    if (issue && adapter) {
+      const prompt = adapter.buildPrompt(issue);
       const rand = Math.random().toString(36).slice(2);
       promptFile = resolve(tmpdir(), `jmux-prompt-${Date.now()}-${rand}`);
       writeFileSync(promptFile, prompt, "utf-8");

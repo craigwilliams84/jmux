@@ -27,6 +27,12 @@ describe("createAdapters", () => {
     expect(result.issueTracker!.type).toBe("linear");
   });
 
+  test("creates jira issue tracker adapter", () => {
+    const result = createAdapters({ issueTracker: { type: "jira" } });
+    expect(result.issueTracker).not.toBeNull();
+    expect(result.issueTracker!.type).toBe("jira");
+  });
+
   test("returns null for unknown adapter type", () => {
     const result = createAdapters({ codeHost: { type: "bitbucket" } });
     expect(result.codeHost).toBeNull();

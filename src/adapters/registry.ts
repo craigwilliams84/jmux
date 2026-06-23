@@ -2,6 +2,7 @@ import type { AdapterConfig, CodeHostAdapter, IssueTrackerAdapter } from "./type
 import { GitLabAdapter } from "./gitlab";
 import { GitHubAdapter } from "./github";
 import { LinearAdapter } from "./linear";
+import { JiraAdapter } from "./jira";
 
 export interface AdapterSet {
   codeHost: CodeHostAdapter | null;
@@ -27,6 +28,9 @@ export function createAdapters(config: AdapterConfig | undefined): AdapterSet {
     switch (config.issueTracker.type) {
       case "linear":
         result.issueTracker = new LinearAdapter(config.issueTracker);
+        break;
+      case "jira":
+        result.issueTracker = new JiraAdapter(config.issueTracker);
         break;
     }
   }
