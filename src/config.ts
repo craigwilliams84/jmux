@@ -6,11 +6,19 @@ import type { PanelView } from "./panel-view";
 import { logError } from "./log";
 
 export interface IssueWorkflowConfig {
-  teamRepoMap?: Record<string, string>;  // Linear team name → repo directory
+  teamRepoMap?: Record<string, string>;  // issue tracker team/project name → repo directory
   defaultBaseBranch?: string;             // default: "main"
   autoCreateWorktree?: boolean;           // default: true
   autoLaunchAgent?: boolean;              // default: true — launch claude with issue context
   sessionNameTemplate?: string;           // default: "{identifier}" — supports {identifier}, {title}
+  /**
+   * Ordered status names for "manual advance" — a team's canonical workflow,
+   * e.g. ["Ready for Developer", "In Development", "In Review", "Ready for Test"].
+   * Advancing an issue moves it to the next name in this list. Tracker-agnostic;
+   * the adapter resolves a name to whatever the tracker needs (a Jira transition,
+   * a Linear state id, etc.).
+   */
+  statusProgression?: string[];
 }
 
 export interface SnapshotConfig {

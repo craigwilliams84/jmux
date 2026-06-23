@@ -412,7 +412,7 @@ export class InputRouter {
         if (data === "n" && this.opts.onPanelCreateSession) { this.opts.onPanelCreateSession(); return; }
         if (data === "l" && this.opts.onPanelLinkToSession) { this.opts.onPanelLinkToSession(); return; }
       }
-      if (this.panelTabsActive && this.opts.onPanelAction && (data === "o" || data === "a" || data === "s" || data === "c" || data === "C")) {
+      if (this.panelTabsActive && this.opts.onPanelAction && (data === "o" || data === "a" || data === "s" || data === "c" || data === "C" || data === ">")) {
         this.opts.onPanelAction(data);
         return;
       }

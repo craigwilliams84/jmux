@@ -27,6 +27,7 @@ import { InfoPanel } from "./info-panel";
 import { parseViews, cycleGroupBy, cycleSortBy, toggleSortOrder, type PanelView } from "./panel-view";
 import { transformIssues, transformMrs, buildViewNodes, renderView, createViewState, filterItems, type ViewState, type ViewNode, type IssueSessionInfo } from "./panel-view-renderer";
 import { createAdapters } from "./adapters/registry";
+import { nextStatusInProgression } from "./adapters/progression";
 import { PollCoordinator } from "./adapters/poll-coordinator";
 import { SessionState } from "./session-state";
 import type { SessionContext } from "./adapters/types";
@@ -1929,7 +1930,16 @@ const inputRouter = new InputRouter(
       }
       if (selected.item.type === "issue" && adapters.issueTracker) {
         const issue = selected.item.raw as import("./adapters/types").Issue;
+        const applyStatus = (status: string) => {
+          pollCoordinator.optimisticIssueStatus(issue.id, status);
+          adapters.issueTracker!.updateStatus(issue.id, status).then(() => { pollCoordinator.refreshGlobalItem("issue", issue.id); });
+        };
         if (key === "o") adapters.issueTracker.openInBrowser(issue.id);
+        if (key === ">") {
+          // Manual advance: step one stage along the configured progression.
+          const next = nextStatusInProgression(issue.status, configStore.config.issueWorkflow?.statusProgression);
+          if (next) applyStatus(next);
+        }
         if (key === "c") {
           // Copy issue prompt to clipboard via OSC 52
           const prompt = `You are working on ${issue.identifier}: ${issue.title}\n\n${issue.description ?? ""}\n\nStart by understanding the relevant code, then propose an approach.`;
@@ -1937,19 +1947,25 @@ const inputRouter = new InputRouter(
           process.stdout.write(`\x1b]52;c;${encoded}\x07`);
         }
         if (key === "s") {
-          adapters.issueTracker.getAvailableStatuses(issue.id).then((statuses) => {
+          const showPicker = (statuses: string[]) => {
             if (statuses.length === 0) return;
             const items = statuses.map((s) => ({ id: s, label: s }));
             const listModal = new ListModal({ items, header: "Update Status" });
             listModal.open();
             openModal(listModal, (selected: unknown) => {
               const sel = selected as { id: string };
-              if (sel?.id) {
-                pollCoordinator.optimisticIssueStatus(issue.id, sel.id);
-                adapters.issueTracker!.updateStatus(issue.id, sel.id).then(() => { pollCoordinator.refreshGlobalItem("issue", issue.id); });
-              }
+              if (sel?.id) applyStatus(sel.id);
             });
-          });
+          };
+          // Prefer the team's configured progression so the picker shows the
+          // familiar ordered stages; otherwise fall back to the tracker's
+          // live set of valid next statuses.
+          const progression = configStore.config.issueWorkflow?.statusProgression ?? [];
+          if (progression.length > 0) {
+            showPicker(progression);
+          } else {
+            adapters.issueTracker.getAvailableStatuses(issue.id).then(showPicker);
+          }
         }
       }
     },
@@ -2190,6 +2206,11 @@ function buildPaletteCommands(): PaletteCommand[] {
     category: "setting",
   });
   commands.push({
+    id: "setting-status-progression",
+    label: `Status progression: ${(wf?.statusProgression ?? []).join(" → ") || "none"}`,
+    category: "setting",
+  });
+  commands.push({
     id: "setting-auto-worktree",
     label: `Auto-create worktree: ${wf?.autoCreateWorktree !== false ? "on" : "off"}`,
     category: "setting",
@@ -2230,6 +2251,14 @@ function currentStateColorName(state: AgentState): string {
 
 function persistStateColor(state: AgentState, name: string): void {
   configStore.set("stateColors", { ...configStore.config.stateColors, [state]: name });
+}
+
+/** Parse a comma-separated status progression into a trimmed, non-empty list. */
+function parseStatusProgression(value: string): string[] {
+  return value
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 }
 
 function buildSettingsCategories(): SettingsCategory[] {
@@ -2327,7 +2356,7 @@ function buildSettingsCategories(): SettingsCategory[] {
         {
           id: "issue-tracker", label: "Issue tracker", type: "list" as const,
           getValue: () => adapterCfg()?.issueTracker?.type ?? "none",
-          options: ["linear", "github", "none"],
+          options: ["linear", "jira", "github", "none"],
           onOptionSelect: (v) => configStore.setAdapter("issueTracker", v === "none" ? null : { type: v }),
         },
         {
@@ -2350,6 +2379,11 @@ function buildSettingsCategories(): SettingsCategory[] {
           id: "session-template", label: "Session name template", type: "text" as const,
           getValue: () => wf()?.sessionNameTemplate ?? "{identifier}",
           onTextCommit: (v) => configStore.setWorkflow("sessionNameTemplate", v),
+        },
+        {
+          id: "status-progression", label: "Status progression", type: "text" as const,
+          getValue: () => (wf()?.statusProgression ?? []).join(", ") || "none",
+          onTextCommit: (v) => configStore.setWorkflow("statusProgression", parseStatusProgression(v)),
         },
         {
           id: "auto-worktree", label: "Auto-create worktree", type: "boolean" as const,
@@ -2970,6 +3004,7 @@ async function handlePaletteAction(result: PaletteResult): Promise<void> {
     case "setting-issue-tracker": {
       const options = [
         { id: "linear", label: "Linear" },
+        { id: "jira", label: "Jira" },
         { id: "github", label: "GitHub Issues" },
         { id: "none", label: "None (disable)" },
       ];
@@ -3065,6 +3100,19 @@ async function handlePaletteAction(result: PaletteResult): Promise<void> {
       modal.open();
       openModal(modal, async (value) => {
         configStore.setWorkflow("sessionNameTemplate", value as string);
+      });
+      return;
+    }
+    case "setting-status-progression": {
+      const current = (configStore.config.issueWorkflow?.statusProgression ?? []).join(", ");
+      const modal = new InputModal({
+        header: "Status Progression",
+        subheader: "Comma-separated, in order (e.g. Ready for Developer, In Development, In Review, Ready for Test)",
+        value: current,
+      });
+      modal.open();
+      openModal(modal, async (value) => {
+        configStore.setWorkflow("statusProgression", parseStatusProgression(value as string));
       });
       return;
     }

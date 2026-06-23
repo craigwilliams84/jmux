@@ -142,7 +142,8 @@ jmux's own settings (not tmux settings) live in `~/.config/jmux/config.json`. Ed
     "defaultBaseBranch": "main",
     "autoCreateWorktree": true,
     "autoLaunchAgent": true,
-    "sessionNameTemplate": "{identifier}"
+    "sessionNameTemplate": "{identifier}",
+    "statusProgression": []
   },
   "panelViews": []
 }
