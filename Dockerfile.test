@@ -15,7 +15,8 @@ WORKDIR /app
 
 # Copy project files
 COPY package.json bun.lock* ./
-RUN bun install --frozen-lockfile || bun install
+# Fail loudly on lockfile drift rather than silently resolving unpinned versions.
+RUN bun install --frozen-lockfile
 
 COPY . .
 
